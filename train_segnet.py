@@ -3,28 +3,13 @@ import os.path as osp
 from tqdm import tqdm
 import torch
 from torch.utils.data.dataloader import DataLoader
+from torch.optim.lr_scheduler import StepLR
 from pytorch.handsegnet import HandSegNet
 from pytorch.segdataset import SegDataset
+from pytorch.unnormalize import UnNormalize
 from torchvision import transforms
 import cv2
 import numpy as np
-
-class UnNormalize(object):
-    def __init__(self, mean, std):
-        self.mean = mean
-        self.std = std
-
-    def __call__(self, tensor):
-        """
-        Args:
-            tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
-        Returns:
-            Tensor: Normalized image.
-        """
-        for t, m, s in zip(tensor, self.mean, self.std):
-            t.mul_(s).add_(m)
-            # The normalize code -> t.sub_(m).div_(s)
-        return tensor
 
 def weights_init(m):
     if isinstance(m, torch.nn.Conv2d):
@@ -96,6 +81,7 @@ def main():
     device = torch.device('cuda:0' if use_cuda else 'cpu')
 
     transform = transforms.Compose([
+        transforms.ColorJitter(hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], inplace=True)
         ])
@@ -109,16 +95,18 @@ def main():
     model = HandSegNet().to(device)
     model.apply(weights_init)
 
-    if osp.isfile('handsegnet.pth'):
-        print('find the checkpoint model! loading...')
-        model.load_state_dict(torch.load('handsegnet.pth'))
-
-    optimizer = torch.optim.Adam(model.parameters())
-
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
     loss_fn = torch.nn.CrossEntropyLoss()
 
     best_loss = -1
+    if osp.isfile('handsegnet.pth'):
+        print('find the checkpoint model! loading...')
+        model.load_state_dict(torch.load('handsegnet.pth'))
+        best_loss = eval(model, test_dataloader, loss_fn, device)
+
     for epoch in range(args.epochs):
+        print('Epoch:', epoch,'LR:', scheduler.get_lr())
         train(model, train_dataloader, epoch, args.epochs, loss_fn, optimizer, device)
         eval_loss = eval(model, test_dataloader, loss_fn, device)
         
@@ -126,6 +114,7 @@ def main():
             print('best loss {} bigger than eval loss {}. save the model'.format(best_loss, eval_loss))
             best_loss = eval_loss
             torch.save(model.state_dict(), 'handsegnet.pth')
+        scheduler.step()
 
 if __name__ == '__main__':
     main()

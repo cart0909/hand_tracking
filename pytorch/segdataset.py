@@ -6,6 +6,7 @@ from torch.utils.data.dataset import Dataset
 import cv2
 import numpy as np
 from torchvision import transforms
+from PIL import Image
 
 class SegDataset(Dataset):
     def __init__(self, root, is_train=True, output_size=None, transform=None):
@@ -39,17 +40,25 @@ class SegDataset(Dataset):
             new_mask = cv2.resize(new_mask, (self.output_size, self.output_size), interpolation=cv2.INTER_LINEAR)
 
         if self.transform is not None:
+            img = Image.fromarray(img)
             img = self.transform(img)
             new_mask = torch.from_numpy(new_mask).type(torch.long)
 
         return img, new_mask
 
 if __name__ == '__main__':
+    from unnormalize import UnNormalize
     transform = transforms.Compose([
+        transforms.ColorJitter(hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5], inplace=True)
     ])
     dataset = SegDataset('.', output_size=256, transform=transform)
     img, mask = dataset[0]
-    print(img.dtype)
-    print(mask.dtype)
+    unnorm = UnNormalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
+    img = unnorm(img)
+    img = img.view(3, 256, 256)
+    img = img.permute(1, 2, 0)
+    img = img.numpy()
+    cv2.imshow('img', img)
+    cv2.waitKey(0)
